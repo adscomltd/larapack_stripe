@@ -1,0 +1,44 @@
+{
+  "name": "adscomltd/larapack_stripe",
+  "description": "Adds price manager support",
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "Armen Matevosyan",
+      "email": "aamatevosyan@edu.hse.ru",
+      "homepage": "https://hyperstech.com"
+    }
+  ],
+  "homepage": "https://github.com/adscomltd/larapack_stripe",
+  "keywords": [
+    "Laravel",
+    "LarapackStripe"
+  ],
+  "require": {
+    "illuminate/support": "~7|~8",
+    "adscomltd/larapack_payment_manager": "^0.0",
+    "stripe/stripe-php": "^7.100"
+  },
+  "require-dev": {
+    "roave/security-advisories": "dev-latest",
+    "phpunit/phpunit": "~9.0",
+    "orchestra/testbench": "~5|~6"
+  },
+  "autoload": {
+    "psr-4": {
+      "Adscom\\LarapackStripe\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Adscom\\LarapackStripe\\Tests\\": "tests"
+    }
+  },
+  "extra": {
+    "laravel": {
+      "providers": [
+        "Adscom\\LarapackStripe\\LarapackStripeServiceProvider"
+      ]
+    }
+  }
+}
