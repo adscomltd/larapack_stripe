@@ -2,13 +2,11 @@
 
 namespace Adscom\LarapackStripe;
 
+use Adscom\LarapackPaymentManager\Contracts\OrderItem;
+use Adscom\LarapackPaymentManager\Contracts\PaymentAccount;
+use Adscom\LarapackPaymentManager\Contracts\PaymentCard;
+use Adscom\LarapackPaymentManager\Contracts\PaymentToken;
 use App\Helpers\ArrayUtils;
-use App\Models\OrderItem;
-use App\Models\Payment;
-use App\Models\PaymentAccount;
-use App\Models\PaymentAccountUser;
-use App\Models\PaymentCard;
-use App\Models\PaymentToken;
 use Adscom\LarapackStripe\Webhook\StripeWebhookHandler;
 use Adscom\LarapackPaymentManager\Drivers\PaymentDriver;
 use Adscom\LarapackPaymentManager\Interfaces\ITokenable;
@@ -18,6 +16,7 @@ use Adscom\LarapackPaymentManager\Exceptions\PaymentDriverException;
 use Adscom\LarapackPaymentManager\Exceptions\PaymentRedirectionException;
 use Adscom\LarapackPaymentManager\PaymentResponse;
 use Str;
+use Stripe\Card;
 use Stripe\Customer;
 use Stripe\Exception\ApiErrorException;
 use Stripe\PaymentIntent;
@@ -83,24 +82,37 @@ class StripeDriver extends PaymentDriver implements
    * @param  PaymentCard  $paymentCard
    * @return array
    * @throws ApiErrorException
-   * @throws PaymentRedirectionException
    */
-  public function addPaymentMethod(PaymentCard $paymentCard): array
+  public function addCard(PaymentCard $paymentCard): array
   {
-    /* @var PaymentMethod $paymentMethod */
-    $paymentMethod = $this->client->paymentMethods->create([
-      'type' => 'card',
+    $customer = $this->getOrCreateCustomer();
+
+    $token = $this->client->tokens->create([
       'card' => [
-        'number' => $paymentCard->number,
-        'exp_month' => $paymentCard->exp_month,
-        'exp_year' => $paymentCard->exp_year,
-        'cvc' => $paymentCard->cvc,
+        'number' => $paymentCard->getNumber(),
+        'exp_month' => $paymentCard->getExpirationMonth(),
+        'exp_year' => $paymentCard->getExpirationYear(),
+        'cvc' => $paymentCard->getCVC(),
+        'name' => $paymentCard->getName(),
+        'address_line1' => $paymentCard->getAddressLine1(),
+        'address_line2' => $paymentCard->getAddressLine2(),
+        'address_city' => $paymentCard->getCity(),
+        'address_state' => $paymentCard->getState(),
+        'address_country' => $paymentCard->getCountryISO(),
       ],
-      'billing_details' => $paymentCard->billing_address,
     ]);
 
+    /* @var Card $card */
+    $card = $this->client->customers->createSource(
+      $customer->id,
+      [
+        'source' => $token->id,
+        'metadata' => $this->getCurrentMetaData(),
+      ]
+    );
+
     return [
-      'token' => $paymentMethod->id,
+      'token' => $card->id,
     ];
   }
 
@@ -131,25 +143,22 @@ class StripeDriver extends PaymentDriver implements
   {
     $customer = $this->getOrCreateCustomer();
 
-    $this->order->lineItems->each(
+    $this->order->getLineItems()->each(
       fn(OrderItem $item) => $this->client->invoiceItems->create([
         'customer' => $customer->id,
-        'currency' => Str::of($this->order->processor_currency)->lower(),
-        'description' => $item->product->name,
-        'unit_amount' => $this->formatAmount($item->price, $this->order->processor_currency),
-        'quantity' => $item->qty,
+        'currency' => Str::of($this->order->getProcessorCurrency())->lower(),
+        'description' => $item->getName(),
+        'unit_amount' => $this->formatAmount($item->getPrice(), $this->order->getProcessorCurrency()),
+        'quantity' => $item->getQuantity(),
       ])
     );
 
-    $this->order->lineItems->each(
-      fn(OrderItem $item) => $this->client->invoiceItems->create([
-        'customer' => $customer->id,
-        'currency' => Str::of($this->order->processor_currency)->lower(),
-        'description' => $item->product->name,
-        'unit_amount' => $this->formatAmount($item->price, $this->order->processor_currency),
-        'quantity' => $item->qty,
-      ])
-    );
+    $this->client->invoiceItems->create([
+      'customer' => $customer->id,
+      'currency' => Str::of($this->order->getProcessorCurrency())->lower(),
+      'description' => $this->order->getShippingName(),
+      'amount' => $this->formatAmount($this->order->getShippingCost(), $this->order->getProcessorCurrency()),
+    ]);
   }
 
   /**
@@ -159,7 +168,6 @@ class StripeDriver extends PaymentDriver implements
   protected function getPaymentIntent(): PaymentIntent
   {
     $customer = $this->getOrCreateCustomer();
-    $token = $this->getOrCreateToken($this->paymentCard)->token;
 
     $this->createInvoiceItems();
 
@@ -168,12 +176,8 @@ class StripeDriver extends PaymentDriver implements
       'auto_advance' => false, /* Auto-finalize this draft after ~1 hour */
       'collection_method' => 'send_invoice',
       'days_until_due' => 0,
-      'default_payment_method' => $token,
-      'description' => 'Shipping: '.$this->order->shipping_data['method_name'],
-      'payment_settings' => [
-        'payment_method_types' => ['card'],
-      ],
-      'statement_descriptor' => $this->paymentAccount->descriptor,
+      'description' => 'Shipping: '.$this->order->getShippingName(),
+      'statement_descriptor' => $this->paymentAccount->getDescriptor(),
       'metadata' => $this->getCurrentMetaData(),
     ]);
 
@@ -188,22 +192,30 @@ class StripeDriver extends PaymentDriver implements
    */
   protected function setupPaymentIntent(PaymentIntent $paymentIntent): void
   {
+    $address = $this->order->getAddress();
+    $customer = $this->getOrCreateCustomer();
+    $token = $this->getOrCreateToken($this->paymentCard)->getToken();
+
     $paymentIntent->updateAttributes([
       'shipping' => [
         'address' => [
-          'city' => $this->order->shippingAddress->city,
-          'country' => $this->order->shippingAddress->country->iso,
-          'line1' => $this->order->shippingAddress->address_line_1,
-          'line2' => $this->order->shippingAddress->address_line_2,
-          'postal_code' => $this->order->shippingAddress->zip_code,
-          'state' => $this->order->shippingAddress->state,
+          'city' => $address->getCity(),
+          'country' => $address->getCountryISO(),
+          'line1' => $address->getAddressLine1(),
+          'line2' => $address->getAddressLine2(),
+          'postal_code' => $address->getZipCode(),
+          'state' => $address->getState(),
         ],
-        'carrier' => $this->order->shipping_data['method_name'],
-        'name' => $this->order->shippingAddress->name,
-        'phone' => $this->order->shippingAddress->phone,
+        'carrier' => $this->order->getShippingName(),
+        'name' => $address->getName(),
+        'phone' => $address->getPhone(),
       ],
       'metadata' => $this->getCurrentMetaData(),
       'receipt_email' => $this->user->email,
+      'payment_method' => $token,
+      'payment_settings' => [
+        'payment_method_types' => ['card'],
+      ],
     ]);
     $paymentIntent->save();
 
@@ -231,13 +243,13 @@ class StripeDriver extends PaymentDriver implements
         throw new PaymentRedirectionException($url,
           $paymentIntent->toArray(),
           'payment_redirection_exception:payment_intent.requires_action',
-          ['redirect_to' => $url, 'payment_card_id' => $this->paymentCard->id],
+          ['redirect_to' => $url, 'payment_card_id' => $this->paymentCard->getId()],
         );
       }
 
       $status = $this->getPaymentStatus($paymentIntent->status);
       $this->paymentResponse->setPaidAmount(
-        $this->getOriginalAmount($paymentIntent->amount_received, $this->order->processor_currency)
+        $this->getOriginalAmount($paymentIntent->amount_received, $this->order->getProcessorCurrency())
       );
       $this->paymentResponse->setStatus($status);
     } catch (ApiErrorException $e) {
@@ -248,11 +260,12 @@ class StripeDriver extends PaymentDriver implements
   public function handleResponse($paypalResponse): PaymentResponse
   {
     $this->paymentResponse->setResponse($paypalResponse->toArray());
-    $this->paymentResponse->setProcessorCurrency($this->order->processor_currency);
+    $this->paymentResponse->setProcessorCurrency($this->order->getProcessorCurrency());
     $this->paymentResponse->setProcessorStatus($paypalResponse->status);
     $this->paymentResponse->setProcessorTransactionId($paypalResponse->id);
     $this->paymentResponse->setPaymentTokenId(
-      PaymentToken::where('token', $paypalResponse->payment_method)->first()?->id
+      PaymentDriver::getPaymentTokenContractClass()::find(['token' => $paypalResponse->payment_method])
+        ->getId()
     );
 
     return $this->paymentResponse;
@@ -267,22 +280,22 @@ class StripeDriver extends PaymentDriver implements
       return $this->paymentToken;
     }
 
-    $this->paymentToken = $this->user
-      ->paymentTokens()
-      ->where('payment_account_id', $this->paymentAccount->id)
-      ->where('payment_card_id', $this->paymentCard->id)
-      ->first();
+    $this->paymentToken = self::getPaymentTokenContractClass()::find([
+      'payment_account_id' => $this->paymentAccount->getId(),
+      'payment_card_id' => $this->paymentCard->getId(),
+      'user_id' => $this->user->id,
+    ]);
 
     if (!$this->paymentToken) {
-      $data = $this->addPaymentMethod($paymentCard);
+      $data = $this->addCard($paymentCard);
 
-      $this->paymentToken = $this->user
-        ->paymentTokens()
-        ->create(array_merge($data,
+      $this->paymentToken = self::getPaymentTokenContractClass()::create(array_merge($data,
           [
-            'payment_account_id' => $this->paymentAccount->id,
-            'payment_card_id' => $this->paymentCard->id,
-          ]));
+            'user_id' => $this->user->id,
+            'payment_account_id' => $this->paymentAccount->getId(),
+            'payment_card_id' => $this->paymentCard->getId(),
+          ])
+      );
     }
 
     return $this->paymentToken;
@@ -325,9 +338,8 @@ class StripeDriver extends PaymentDriver implements
         'email' => config('app.prefix')."_".$this->user->email,
       ]);
 
-      PaymentAccountUser::create([
+      $this->paymentAccount->createData([
         'user_id' => $this->user->id,
-        'payment_account_id' => $this->paymentAccount->id,
         'data' => $data = [
           'id' => $this->customer->id,
         ],
@@ -341,13 +353,14 @@ class StripeDriver extends PaymentDriver implements
 
   protected function getPaymentStatus(string $status): int
   {
+    $paymentClass = self::getPaymentContractClass();
     return match ($status) {
-      self::STATUS_REQUIRES_PAYMENT_METHOD => Payment::STATUS_CREATED,
-      self::STATUS_SUCCEEDED => Payment::STATUS_PAID,
-      self::STATUS_CANCELLED => Payment::STATUS_REFUND,
-      self::STATUS_PROCESSING => Payment::STATUS_INITIATED,
-      self::STATUS_REQUIRES_ACTION => Payment::STATUS_DECLINED,
-      default => Payment::STATUS_ERROR,
+      self::STATUS_REQUIRES_PAYMENT_METHOD => $paymentClass::getCreatedStatus(),
+      self::STATUS_SUCCEEDED => $paymentClass::getPaidStatus(),
+      self::STATUS_CANCELLED => $paymentClass::getRefundStatus(),
+      self::STATUS_PROCESSING => $paymentClass::getInitiatedStatus(),
+      self::STATUS_REQUIRES_ACTION => $paymentClass::getDeclinedStatus(),
+      default => $paymentClass::getErrorStatus(),
     };
   }
 }

@@ -2,7 +2,7 @@
 
 namespace Adscom\LarapackStripe\Webhook\Handlers;
 
-use App\Models\Payment;
+use Adscom\LarapackPaymentManager\Drivers\PaymentDriver;
 use Adscom\LarapackPaymentManager\PaymentResponse;
 use Stripe\Dispute;
 
@@ -20,7 +20,7 @@ class ChargeDisputeClosedHandler extends AbstractStripeWebhookEventHandler
     $disputeAmount = $this->driver->getOriginalAmount($dispute->amount, $dispute->currency);
     $this->paymentResponse->setPaidAmount($disputeAmount);
 
-    $this->paymentResponse->setStatus(Payment::STATUS_CHARGEBACK);
+    $this->paymentResponse->setStatus(PaymentDriver::getPaymentContractClass()::getChargebackStatus());
 
     return $this->paymentResponse;
   }

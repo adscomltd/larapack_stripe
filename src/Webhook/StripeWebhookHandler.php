@@ -2,7 +2,8 @@
 
 namespace Adscom\LarapackStripe\Webhook;
 
-use App\Models\Payment;
+use Adscom\LarapackPaymentManager\Contracts\Payment;
+use Adscom\LarapackPaymentManager\Drivers\PaymentDriver;
 use Adscom\LarapackStripe\StripeDriver;
 use Adscom\LarapackStripe\Webhook\Handlers\AbstractStripeWebhookEventHandler;
 use Adscom\LarapackPaymentManager\Interfaces\IWebhookHandler;
@@ -28,17 +29,15 @@ class StripeWebhookHandler implements IWebhookHandler
    */
   public function getPaymentForWebhook(array $data = []): Payment
   {
+    $paymentModelClass = PaymentDriver::getPaymentContractClass();
     if ($uuid = Arr::get($data, 'data.object.metadata.payment_uuid')) {
-      return Payment::where('uuid', $uuid)
-        ->firstOrFail();
+      return $paymentModelClass::findByUuid($uuid);
     }
 
     if ($paymentTransactionId = Arr::get($data, 'data.object.payment_intent',
       Arr::get($data, 'data.object.id')
     )) {
-      return Payment::where('processor_transaction_id', $paymentTransactionId)
-        ->latest()
-        ->firstOrFail();
+      return $paymentModelClass::findByTransactionId($paymentTransactionId);
     }
 
     abort(404, "Can't fetch payment from webhook");

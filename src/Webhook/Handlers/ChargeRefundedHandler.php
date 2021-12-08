@@ -2,6 +2,7 @@
 
 namespace Adscom\LarapackStripe\Webhook\Handlers;
 
+use Adscom\LarapackPaymentManager\Drivers\PaymentDriver;
 use App\Models\Payment;
 use Adscom\LarapackPaymentManager\PaymentResponse;
 use Stripe\Charge;
@@ -16,9 +17,9 @@ class ChargeRefundedHandler extends AbstractStripeWebhookEventHandler
     $refundedAmount = $this->driver->getOriginalAmount($charge->amount_refunded, $charge->currency);
     $this->paymentResponse->setPaidAmount($refundedAmount);
 
-    $status = ($refundedAmount === $this->driver->payment->order->due_amount)
-      ? Payment::STATUS_REFUND
-      : Payment::STATUS_PARTIAL_REFUND;
+    $status = ($refundedAmount === $this->driver->payment->getOrder()->getDueAmount())
+      ? PaymentDriver::getPaymentContractClass()::getRefundStatus()
+      : PaymentDriver::getPaymentContractClass()::getPartialRefundStatus();
 
     $this->paymentResponse->setStatus($status);
 

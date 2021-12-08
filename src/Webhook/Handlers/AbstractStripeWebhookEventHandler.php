@@ -2,6 +2,7 @@
 
 namespace Adscom\LarapackStripe\Webhook\Handlers;
 
+use Adscom\LarapackPaymentManager\Drivers\PaymentDriver;
 use App\Models\PaymentToken;
 use Adscom\LarapackStripe\StripeDriver;
 use Adscom\LarapackPaymentManager\PaymentResponse;
@@ -31,6 +32,7 @@ abstract class AbstractStripeWebhookEventHandler
     $instance = new $className($driver, $event);
     $instance->handleResponse();
     $paymentResponse = $instance->getPaymentResponse();
+    ray($paymentResponse);
 
     if ($paymentResponse) {
       $instance->driver->createPaymentFromResponse($paymentResponse);
@@ -43,11 +45,12 @@ abstract class AbstractStripeWebhookEventHandler
   {
     $this->paymentResponse->setIsWebHookPayment(true);
     $this->paymentResponse->setResponse($this->event->toArray());
-    $this->paymentResponse->setProcessorCurrency($this->driver->order->processor_currency);
+    $this->paymentResponse->setProcessorCurrency($this->driver->order->getProcessorCurrency());
     $this->paymentResponse->setProcessorStatus($this->stripeObject->status);
     $this->paymentResponse->setProcessorTransactionId($this->stripeObject->id);
     $this->paymentResponse->setPaymentTokenId(
-      PaymentToken::where('token', $this->stripeObject->payment_method)->first()?->id
+      PaymentDriver::getPaymentTokenContractClass()::find(['token' => $this->stripeObject->payment_method])
+        ?->getId()
     );
   }
 }
