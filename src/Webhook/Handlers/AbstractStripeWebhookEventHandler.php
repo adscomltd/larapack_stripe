@@ -32,7 +32,6 @@ abstract class AbstractStripeWebhookEventHandler
     $instance = new $className($driver, $event);
     $instance->handleResponse();
     $paymentResponse = $instance->getPaymentResponse();
-    ray($paymentResponse);
 
     if ($paymentResponse) {
       $instance->driver->createPaymentFromResponse($paymentResponse);
