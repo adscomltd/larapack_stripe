@@ -6,7 +6,7 @@ use Adscom\LarapackPaymentManager\Contracts\OrderItem;
 use Adscom\LarapackPaymentManager\Contracts\PaymentAccount;
 use Adscom\LarapackPaymentManager\Contracts\PaymentCard;
 use Adscom\LarapackPaymentManager\Contracts\PaymentToken;
-use App\Helpers\ArrayUtils;
+use Adscom\LarapackStripe\Helpers\ArrayUtils;
 use Adscom\LarapackStripe\Webhook\StripeWebhookHandler;
 use Adscom\LarapackPaymentManager\Drivers\PaymentDriver;
 use Adscom\LarapackPaymentManager\Interfaces\ITokenable;
