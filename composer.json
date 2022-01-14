@@ -16,7 +16,7 @@
   ],
   "require": {
     "illuminate/support": "~7|~8",
-    "adscomltd/larapack_payment_manager": "^0.0",
+    "adscomltd/larapack_payment_manager": "@dev",
     "stripe/stripe-php": "^7.100"
   },
   "require-dev": {

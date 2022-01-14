@@ -153,12 +153,14 @@ class StripeDriver extends PaymentDriver implements
       ])
     );
 
-    $this->client->invoiceItems->create([
-      'customer' => $customer->id,
-      'currency' => Str::of($this->order->getProcessorCurrency())->lower(),
-      'description' => $this->order->getShippingName(),
-      'amount' => $this->formatAmount($this->order->getShippingCost(), $this->order->getProcessorCurrency()),
-    ]);
+    if ($this->order->hasShippingData()) {
+      $this->client->invoiceItems->create([
+        'customer' => $customer->id,
+        'currency' => Str::of($this->order->getProcessorCurrency())->lower(),
+        'description' => $this->order->getShippingName(),
+        'amount' => $this->formatAmount($this->order->getShippingCost(), $this->order->getProcessorCurrency()),
+      ]);
+    }
   }
 
   /**
@@ -176,7 +178,7 @@ class StripeDriver extends PaymentDriver implements
       'auto_advance' => false, /* Auto-finalize this draft after ~1 hour */
       'collection_method' => 'send_invoice',
       'days_until_due' => 0,
-      'description' => 'Shipping: '.$this->order->getShippingName(),
+      'description' => null,
       'statement_descriptor' => $this->paymentAccount->getDescriptor(),
       'metadata' => $this->getCurrentMetaData(),
     ]);
@@ -206,7 +208,7 @@ class StripeDriver extends PaymentDriver implements
           'postal_code' => $address->getZipCode(),
           'state' => $address->getState(),
         ],
-        'carrier' => $this->order->getShippingName(),
+        'carrier' => $this->order->hasShippingData() ? $this->order->getShippingName() : null,
         'name' => $address->getName(),
         'phone' => $address->getPhone(),
       ],
@@ -338,12 +340,13 @@ class StripeDriver extends PaymentDriver implements
         'email' => config('app.prefix')."_".$this->user->email,
       ]);
 
-      $this->paymentAccount->createData([
-        'user_id' => $this->user->id,
-        'data' => $data = [
-          'id' => $this->customer->id,
-        ],
-      ]);
+      $this->paymentAccount->createData(
+        $this->user,
+        [
+          'data' => $data = [
+            'id' => $this->customer->id,
+          ],
+        ]);
 
       $this->paymentAccountData = $data;
     }
